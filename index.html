@@ -32,12 +32,31 @@
     .list-group-item:hover { background-color: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
     .pinyin-text { color: #007bff; font-size: 0.9rem; font-family: 'Arial', sans-serif; }
 
-    .quiz-token { margin: 5px; font-size: 1.2rem; border-radius: 8px; padding: 10px 20px; cursor: grab; }
-    .quiz-token:active { cursor: grabbing; }
+    /* クイズ画面のデザイン */
+    .quiz-token { 
+      margin: 5px; font-size: 1.2rem; border-radius: 8px; padding: 10px 20px; 
+      cursor: pointer; transition: all 0.2s; 
+      background-color: white; color: #212529; border: 1px solid #212529;
+    }
+    /* ★修正：ホバー時に背景を黒、文字を白にして見えなくなるのを防ぐ */
+    .quiz-token:hover { 
+      transform: scale(1.05); 
+      background-color: #212529 !important; 
+      color: white !important; 
+    }
+    
+    /* 上段（回答エリア） */
     #answer-area { 
-      min-height: 80px; border: 2px dashed #007bff; padding: 15px; margin-bottom: 20px; 
+      min-height: 80px; border-bottom: 2px dashed #007bff; padding: 15px; margin-bottom: 15px; 
       display: flex; align-items: center; justify-content: center; flex-wrap: wrap;
       background-color: rgba(255,255,255,0.8); border-radius: 10px;
+    }
+    #answer-area .quiz-token { cursor: grab; }
+    #answer-area .quiz-token:active { cursor: grabbing; }
+
+    /* 下段（選択肢エリア） */
+    #token-area {
+      min-height: 60px; display: flex; align-items: center; justify-content: center; flex-wrap: wrap;
     }
 
     @keyframes success-pop { 0% { transform: scale(1); } 50% { transform: scale(1.05); background-color: #d4edda; } 100% { transform: scale(1); } }
@@ -81,8 +100,11 @@
     <div id="quiz-card" class="card border-primary p-3">
       <div class="card-body text-center">
         <h5 class="mb-3 fw-bold">並べ替えトレーニング</h5>
-        <p class="text-muted small mb-3">単語をドラッグ＆ドロップして正しい順番に並べ替えてください。</p>
+        <p class="text-muted small mb-3">下の単語をクリックして上の枠に入れ、上の枠内ではドラッグで順番を入れ替えることができます。</p>
+        
         <div id="answer-area"></div>
+        <div id="token-area"></div>
+
         <div class="mt-4">
           <button class="btn btn-light me-2" onclick="resetQuiz()">やり直し</button>
           <button class="btn btn-primary px-5 fw-bold shadow-sm" onclick="checkAnswer()">判定</button>
@@ -110,6 +132,8 @@
   let sortableInstance = null;
   
   let evalResults = {};
+  let firstPracticeTime = null; // ★追加：最初の練習日時を記録する変数
+
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   let recognition = null;
   let isRecording = false;
@@ -120,7 +144,6 @@
     initSpeechRecognition();
   };
 
-  // GASからカテゴリを取得
   async function fetchCategories() {
     try {
       const res = await fetch(`${GAS_URL}?action=getCategories`);
@@ -140,10 +163,10 @@
     `).join('');
   }
 
-  // GASから例文を取得
   async function fetchSentences(category) {
     currentCategory = category;
     evalResults = {}; 
+    firstPracticeTime = null; // ★追加：カテゴリ変更時に日時をリセット
     document.getElementById('copy-btn').classList.add('hidden');
     document.getElementById('current-category-name').innerText = category;
     document.getElementById('sentence-list').innerHTML = '<p class="text-center py-5">読み込み中...</p>';
@@ -233,6 +256,11 @@
   };
 
   function evaluate(index, transcript) {
+    // ★追加：最初の練習時に日時を記録
+    if (!firstPracticeTime) {
+      firstPracticeTime = new Date();
+    }
+
     const item = sentences[index];
     const normalizeText = (text) => text ? text.replace(/[\s　，。？！、：；“”‘’（）\(\)\[\]【】,\.\?!:;"']/g, '') : "";
     
@@ -271,7 +299,12 @@
 
   function copyToClipboard() {
     if (Object.keys(evalResults).length === 0) return;
-    let textToCopy = `【${currentCategory} 練習記録】\n\n`;
+    
+    // ★追加：日時のフォーマット
+    const dateStr = firstPracticeTime ? firstPracticeTime.toLocaleString('ja-JP') : '';
+    
+    let textToCopy = `【${currentCategory} 練習記録】\n`;
+    textToCopy += `実施日時: ${dateStr}\n\n`; // ★追加：ヘッダー下部に日時を追加
     
     sentences.forEach((item, index) => {
       const res = evalResults[index];
@@ -309,18 +342,34 @@
 
   function setupQuiz(dataString) {
     const tokens = dataString.split(',').sort(() => Math.random() - 0.5);
+    const tokenArea = document.getElementById('token-area');
     const answerArea = document.getElementById('answer-area');
+    tokenArea.innerHTML = '';
     answerArea.innerHTML = '';
 
     tokens.forEach(t => {
-      const div = document.createElement('div');
-      div.className = 'btn btn-outline-dark quiz-token shadow-sm fw-bold bg-white';
-      div.innerText = t;
-      answerArea.appendChild(div);
+      const btn = document.createElement('button');
+      btn.className = 'quiz-token shadow-sm fw-bold'; // ★修正：Bootstrapのクラスを外しカスタムクラスのみに
+      btn.innerText = t;
+      btn.onclick = () => moveToAnswer(btn);
+      tokenArea.appendChild(btn);
     });
 
     if (sortableInstance) sortableInstance.destroy();
-    sortableInstance = new Sortable(answerArea, { animation: 150, ghostClass: 'bg-light' });
+    sortableInstance = new Sortable(answerArea, { 
+      animation: 150, 
+      ghostClass: 'bg-light'
+    });
+  }
+
+  function moveToAnswer(btn) {
+    document.getElementById('answer-area').appendChild(btn);
+    btn.onclick = () => moveToTokens(btn);
+  }
+
+  function moveToTokens(btn) {
+    document.getElementById('token-area').appendChild(btn);
+    btn.onclick = () => moveToAnswer(btn);
   }
 
   function resetQuiz() {
